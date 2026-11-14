@@ -1,0 +1,19 @@
+# Web framework
+fastapi==0.162.7
+uvicorn==0.54.0
+pydantic==2.14.3
+python-dotenv==1.2.4
+
+# HTTP client
+httpx==0.28.1
+
+# Background jobs / caching
+redis==8.1.0
+celery==5.7.0
+
+# Embeddings
+sentence-transformers==6.3.0
+
+# Rate limiting / retries
+slowapi==0.1.10
+tenacity==9.2.1
