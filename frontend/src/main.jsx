@@ -1,18 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  BrandMark,
+  ConfirmModal,
+  Icon,
+  Modal,
+  Monogram,
+  ScoreMeter,
+  StatusBadge,
+  ThroughputChart,
+  Toast,
+} from "./components.jsx";
+import { buildPipeline, buildThroughput, loadWorkspace, saveWorkspace } from "./store.js";
 import "./styles.css";
 
 const initialHealth = { status: "checking", api: "checking", database: "checking" };
-
-const mockAgents = [
-  { id: "7f1c2e5a-1234-5678-90ab-cdef01234567", company: "PhonePe", host: "agent.phonepe.example", status: "Active", created: "Today, 10:42" },
-];
-const mockSignals = [
-  { id: "c2f9a1b4-1234-5678-90ab-cdef01234567", time: "10:42:18", publisher: "PhonePe", content: "Launching a merchant lending product for small businesses in India.", matched: 1, delivery: "Delivered" },
-];
-const mockRouting = [
-  { post: "c2f9a1b4", target: "Northstar Capital", distance: "0.12", score: "0.91", delivered: "Yes" },
-];
+const themeKey = "agentmesh-theme";
+const apiKeyStorage = "agentmesh-api-key";
 
 function parseErrorDetail(data, status) {
   if (!data) return `Request failed with status ${status}`;
@@ -22,8 +26,8 @@ function parseErrorDetail(data, status) {
       .map((item) => {
         if (typeof item === "string") return item;
         const field = item.loc ? item.loc[item.loc.length - 1] : "";
-        const msg = item.msg || "Validation error";
-        return field ? `${field}: ${msg}` : msg;
+        const message = item.msg || "Validation error";
+        return field ? `${field}: ${message}` : message;
       })
       .join("; ");
   }
@@ -47,108 +51,135 @@ async function request(path, options = {}) {
   return data;
 }
 
-function Icon({ name, size = 17 }) {
-  const paths = {
-    activity: <><path d="M3 12h4l2-8 4 16 2-8h6" /></>,
-    agents: <><circle cx="9" cy="8" r="3" /><path d="M3 21a6 6 0 0 1 12 0M16 4a3 3 0 0 1 0 6M16 13a5 5 0 0 1 5 5" /></>,
-    arrow: <><path d="M5 12h14M13 6l6 6-6 6" /></>,
-    check: <path d="m5 12 4 4L19 6" />,
-    close: <><path d="m6 6 12 12M18 6 6 18" /></>,
-    copy: <><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>,
-    docs: <><path d="M4 3h12a2 2 0 0 1 2 2v16H6a2 2 0 0 1-2-2z" /><path d="M8 7h6M8 11h6M8 15h4" /></>,
-    eye: <><path d="M2 12s3-6 10-6 10 6 10 6-3 6-10 6S2 12 2 12Z" /><circle cx="12" cy="12" r="2" /></>,
-    eyeOff: <><path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A10.7 10.7 0 0 1 12 5c7 0 10 7 10 7a18.5 18.5 0 0 1-3.1 4.1M6.6 6.6C3.6 8.3 2 12 2 12s3 7 10 7a10.7 10.7 0 0 0 3-.4" /></>,
-    home: <><path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10M9 20v-6h6v6" /></>,
-    menu: <><path d="M4 6h16M4 12h16M4 18h16" /></>,
-    moon: <path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z" />,
-    plus: <><path d="M12 5v14M5 12h14" /></>,
-    refresh: <><path d="M20 11a8 8 0 0 0-14.9-3M4 5v4h4M4 13a8 8 0 0 0 14.9 3M20 19v-4h-4" /></>,
-    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
-    send: <><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></>,
-    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42" /></>,
-    terminal: <><path d="m4 17 6-6-6-6M12 19h8" /></>,
-    x: <><path d="M18 6 6 18M6 6l12 12" /></>,
-  };
-  return <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
+function formatTime(value) {
+  return value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function StatusBadge({ children, tone = "success" }) {
-  return <span className={`badge ${tone}`}><span className="badge-dot" />{children}</span>;
+function formatDay(value) {
+  return value.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
-function ConfirmModal({ title, description, onConfirm, onCancel, children }) {
-  useEffect(() => {
-    const handleKeyDown = (event) => event.key === "Escape" && onCancel();
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
-  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onCancel()}>
-    <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div className="modal-header"><div><h2 id="modal-title">{title}</h2>{description && <p>{description}</p>}</div><button className="icon-button" onClick={onCancel} aria-label="Close dialog"><Icon name="close" /></button></div>
-      <div className="modal-body">{children}</div>
-      <div className="modal-actions">
-        <button className="secondary-button" onClick={onCancel}>Cancel</button>
-        <button className="primary-button" onClick={onConfirm}>Delete</button>
-      </div>
-    </section>
-  </div>;
+function deliveryTone(status) {
+  if (status === "Delivered") return "success";
+  if (status === "Queued") return "warning";
+  return "neutral";
 }
 
-function Modal({ title, description, onClose, children, wide = false }) {
-  useEffect(() => {
-    const handleKeyDown = (event) => event.key === "Escape" && onClose();
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div className="modal-header"><div><h2 id="modal-title">{title}</h2>{description && <p>{description}</p>}</div><button className="icon-button" onClick={onClose} aria-label="Close dialog"><Icon name="close" /></button></div>
-      {children}
-    </section>
-  </div>;
-}
+const routingFilters = [
+  { id: "all", label: "All" },
+  { id: "delivered", label: "Delivered" },
+  { id: "below", label: "Below threshold" },
+];
 
 function App() {
-  const [theme, setTheme] = useState(() => localStorage.getItem("agentmesh-theme") || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+  const [theme, setTheme] = useState(
+    () =>
+      localStorage.getItem(themeKey) ||
+      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+  );
   const [health, setHealth] = useState(initialHealth);
   const [healthError, setHealthError] = useState("");
   const [lastChecked, setLastChecked] = useState(null);
+  const [latency, setLatency] = useState(null);
   const [checking, setChecking] = useState(false);
   const [activeModal, setActiveModal] = useState(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("agentmesh-api-key") || "");
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem(apiKeyStorage) || "");
   const [agent, setAgent] = useState(null);
-
-  const updateApiKey = (key) => {
-    setApiKey(key);
-    if (key) localStorage.setItem("agentmesh-api-key", key);
-    else localStorage.removeItem("agentmesh-api-key");
-  };
   const [credentials, setCredentials] = useState(null);
   const [registering, setRegistering] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [registerError, setRegisterError] = useState("");
   const [postError, setPostError] = useState("");
   const [postContent, setPostContent] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
   const [toast, setToast] = useState(null);
   const [selectedSignal, setSelectedSignal] = useState(null);
-  const [search, setSearch] = useState("");
+  const [searchAgents, setSearchAgents] = useState("");
+  const [searchSignals, setSearchSignals] = useState("");
+  const [routingFilter, setRoutingFilter] = useState("all");
   const [copied, setCopied] = useState("");
   const [deletingAgent, setDeletingAgent] = useState(null);
   const [deletingSignal, setDeletingSignal] = useState(null);
   const [deletingRouting, setDeletingRouting] = useState(null);
-  const [agents, setAgents] = useState(mockAgents);
-  const [signals, setSignals] = useState(mockSignals);
-  const [routing, setRouting] = useState(mockRouting);
+  const [saved] = useState(loadWorkspace);
+  const [agents, setAgents] = useState(saved.agents);
+  const [signals, setSignals] = useState(saved.signals);
+  const [routing, setRouting] = useState(saved.routing);
   const registerTrigger = useRef(null);
 
   const systemReady = health.api === "online";
   const databaseReady = health.database === "connected";
-  const filteredAgents = agents.filter((item) => item.company.toLowerCase().includes(search.toLowerCase()));
+  const activeAgents = agents.filter((item) => item.status === "Active").length;
+  const pausedAgents = agents.length - activeAgents;
+  const deliveredCount = routing.filter((item) => item.delivered).length;
+  const deliveryRate = routing.length ? Math.round((deliveredCount / routing.length) * 100) : 0;
+  const averageRelevance = routing.length
+    ? routing.reduce((sum, item) => sum + item.score, 0) / routing.length
+    : 0;
+
+  const filteredAgents = useMemo(
+    () => agents.filter((item) => item.company.toLowerCase().includes(searchAgents.toLowerCase())),
+    [agents, searchAgents],
+  );
+
+  const filteredSignals = useMemo(() => {
+    const query = searchSignals.trim().toLowerCase();
+    if (!query) return signals;
+    return signals.filter((item) =>
+      `${item.content} ${item.publisher} ${item.id}`.toLowerCase().includes(query),
+    );
+  }, [signals, searchSignals]);
+
+  const filteredRouting = useMemo(() => {
+    if (routingFilter === "delivered") return routing.filter((item) => item.delivered);
+    if (routingFilter === "below") return routing.filter((item) => !item.delivered);
+    return routing;
+  }, [routing, routingFilter]);
+
+  const healthTone =
+    health.status === "ok"
+      ? "success"
+      : health.status === "degraded"
+        ? "warning"
+        : health.status === "offline"
+          ? "danger"
+          : "neutral";
+
+  const healthLabel =
+    health.status === "ok"
+      ? "All systems operational"
+      : health.status === "degraded"
+        ? "Database degraded"
+        : health.status === "offline"
+          ? "API unreachable"
+          : "Checking systems";
+
+  const throughput = useMemo(() => buildThroughput(signals, routing), [signals, routing]);
+  const pipeline = useMemo(() => buildPipeline({ signals, routing }), [signals, routing]);
+  const weekSignals = throughput.reduce((sum, day) => sum + day.signals, 0);
+  const weekMatches = throughput.reduce((sum, day) => sum + day.matches, 0);
+  const peakDay = throughput.reduce(
+    (best, day) => (day.signals > best.signals ? day : best),
+    throughput[0],
+  );
+
+  const updateApiKey = (key) => {
+    setApiKey(key);
+    if (key) localStorage.setItem(apiKeyStorage, key);
+    else localStorage.removeItem(apiKeyStorage);
+  };
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("agentmesh-theme", theme);
+    localStorage.setItem(themeKey, theme);
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", theme === "dark" ? "#0B100F" : "#F3F2ED");
   }, [theme]);
 
   useEffect(() => {
@@ -156,6 +187,10 @@ function App() {
     const timer = setInterval(checkHealth, 15000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    saveWorkspace({ agents, signals, routing });
+  }, [agents, signals, routing]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -166,13 +201,16 @@ function App() {
   async function checkHealth() {
     setChecking(true);
     setHealthError("");
+    const started = performance.now();
     try {
       const data = await request("/health");
       setHealth(data);
       setLastChecked(new Date());
+      setLatency(Math.round(performance.now() - started));
     } catch (error) {
       setHealth({ ...initialHealth, status: "offline", api: "offline", database: "offline" });
       setHealthError(error.message);
+      setLatency(null);
     } finally {
       setChecking(false);
     }
@@ -193,40 +231,54 @@ function App() {
     try {
       const form = new FormData(event.currentTarget);
       const company = (form.get("company_name") || "").toString().trim();
-      let webhook = (form.get("webhook_url") || "").toString().trim();
+      const webhook = (form.get("webhook_url") || "").toString().trim();
       const manifesto = (form.get("interest_manifesto") || "").toString().trim();
 
       if (company.length < 2) {
         throw new Error("Company name must be at least 2 characters.");
       }
       if (!webhook.startsWith("http://") && !webhook.startsWith("https://")) {
-        throw new Error("Webhook URL must start with http:// or https:// (e.g. https://webhook.site/...)");
+        throw new Error("Webhook URL must start with http:// or https://.");
       }
       if (manifesto.length < 20) {
         throw new Error("Interest manifesto must be at least 20 characters.");
       }
 
-      const data = await request("/api/v1/agents/register", { method: "POST", body: JSON.stringify({
-        company_name: company, webhook_url: webhook, interest_manifesto: manifesto,
-      }) });
+      const data = await request("/api/v1/agents/register", {
+        method: "POST",
+        body: JSON.stringify({
+          company_name: company,
+          webhook_url: webhook,
+          interest_manifesto: manifesto,
+        }),
+      });
       updateApiKey(data.api_key);
       setAgent(data);
       setCredentials(data);
-      setAgents(prev => [
+      const createdAt = new Date().toISOString();
+      setAgents((previous) => [
         {
           id: data.agent_id,
-          company: company,
-          host: (function() {
-            try { return new URL(webhook).hostname; }
-            catch(e) { return webhook; }
+          company,
+          host: (() => {
+            try {
+              return new URL(webhook).hostname;
+            } catch {
+              return webhook;
+            }
           })(),
           status: "Active",
-          created: "Just now",
+          createdAt,
+          created: formatDay(new Date(createdAt)),
         },
-        ...prev
+        ...previous,
       ]);
       event.currentTarget.reset();
-      setToast({ tone: "success", title: "Agent registered", message: "Store the credentials before closing this window." });
+      setToast({
+        tone: "success",
+        title: "Agent registered",
+        message: "Store the credentials before closing this window.",
+      });
     } catch (error) {
       setRegisterError(error.message);
     } finally {
@@ -242,27 +294,37 @@ function App() {
       const key = apiKey.trim();
       const content = postContent.trim();
       if (!key) {
-        throw new Error("API key is required. Please register an agent first or paste an active key.");
+        throw new Error("Add an API key, or register an agent to create one.");
       }
       if (content.length < 10) {
         throw new Error("Signal content must be at least 10 characters.");
       }
 
-      const data = await request("/api/v1/posts", { method: "POST", headers: { "X-API-Key": key }, body: JSON.stringify({ content: content }) });
-      setSignals(prev => [
+      const data = await request("/api/v1/posts", {
+        method: "POST",
+        headers: { "X-API-Key": key },
+        body: JSON.stringify({ content }),
+      });
+      const createdAt = new Date().toISOString();
+      setSignals((previous) => [
         {
           id: data.post_id,
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-          publisher: agent?.company_name || "Current Agent",
-          content: content,
+          time: formatTime(new Date(createdAt)),
+          publisher: agent?.company_name || "Your agent",
+          content,
           matched: 0,
           delivery: "Queued",
+          createdAt,
         },
-        ...prev
+        ...previous,
       ]);
       setPostContent("");
       setActiveModal(null);
-      setToast({ tone: "success", title: "Signal queued", message: `Post ${data.post_id.slice(0, 8)} is entering the routing pipeline.` });
+      setToast({
+        tone: "success",
+        title: "Signal queued",
+        message: `Post ${data.post_id.slice(0, 8)} is entering the routing pipeline.`,
+      });
     } catch (error) {
       setPostError(error.message);
     } finally {
@@ -270,54 +332,69 @@ function App() {
     }
   }
 
-  async function deleteAgent(agentId) {
-    setDeletingAgent(agentId);
-  }
-
   async function confirmDeleteAgent(agentId) {
-    const isMock = mockAgents.some(m => m.id === agentId);
+    const target = agents.find((item) => item.id === agentId);
     try {
-      if (!isMock) {
-        await request(`/api/v1/agents/${agentId}`, { method: "DELETE" }).catch(() => {});
+      if (!target?.example && apiKey) {
+        await request(`/api/v1/agents/${agentId}`, {
+          method: "DELETE",
+          headers: { "X-API-Key": apiKey },
+        }).catch(() => {});
       }
     } finally {
-      setAgents(prev => prev.filter(item => item.id !== agentId));
-      setToast({ tone: "success", title: "Agent deleted", message: "Agent removed from workspace." });
+      setAgents((previous) => previous.filter((item) => item.id !== agentId));
+      setToast({
+        tone: "success",
+        title: "Agent removed",
+        message: "The agent is no longer part of this workspace.",
+      });
       setDeletingAgent(null);
     }
   }
 
-  async function deleteSignal(signalId) {
-    setDeletingSignal(signalId);
-  }
-
   async function confirmDeleteSignal(signalId) {
-    const isMock = mockSignals.some(m => m.id === signalId);
+    const target = signals.find((item) => item.id === signalId);
     try {
-      if (!isMock) {
-        await request(`/api/v1/posts/${signalId}`, { method: "DELETE" }).catch(() => {});
+      if (!target?.example && apiKey) {
+        await request(`/api/v1/posts/${signalId}`, {
+          method: "DELETE",
+          headers: { "X-API-Key": apiKey },
+        }).catch(() => {});
       }
     } finally {
-      setSignals(prev => prev.filter(item => item.id !== signalId));
-      setToast({ tone: "success", title: "Signal deleted", message: "Signal removed from workspace." });
+      setSignals((previous) => previous.filter((item) => item.id !== signalId));
+      setSelectedSignal(null);
+      setToast({
+        tone: "success",
+        title: "Signal removed",
+        message: "The signal and its routing history were deleted.",
+      });
       setDeletingSignal(null);
     }
   }
 
-  function deleteRouting(index) {
-    setDeletingRouting(index);
-  }
-
-  function confirmDeleteRouting(index) {
-    setRouting(prev => prev.filter((_, i) => i !== index));
-    setToast({ tone: "success", title: "Activity deleted", message: "Routing entry removed." });
+  function confirmDeleteRouting(routingId) {
+    setRouting((previous) => previous.filter((item) => item.id !== routingId));
+    setToast({
+      tone: "success",
+      title: "Decision removed",
+      message: "The routing entry was removed from the activity log.",
+    });
     setDeletingRouting(null);
   }
 
   async function copyValue(label, value) {
-    await navigator.clipboard.writeText(value);
-    setCopied(label);
-    setTimeout(() => setCopied(""), 1800);
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(label);
+      setTimeout(() => setCopied(""), 1800);
+    } catch {
+      setToast({
+        tone: "error",
+        title: "Copy failed",
+        message: "Select the value and copy it manually.",
+      });
+    }
   }
 
   function closeModal() {
@@ -325,63 +402,911 @@ function App() {
     registerTrigger.current?.focus();
   }
 
-  return <div className="app-shell">
-    <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
-      <div className="sidebar-brand"><span className="brand-mark">A</span><span><strong>AgentMesh</strong><small>Asama.ai</small></span><button className="sidebar-close icon-button" onClick={() => setSidebarOpen(false)} aria-label="Close menu"><Icon name="close" /></button></div>
-      <div className="workspace-switcher"><span className="workspace-avatar">A</span><span><strong>Asama workspace</strong><small>Local environment</small></span><span className="chevron">⌃</span></div>
-      <nav className="sidebar-nav" aria-label="Sidebar navigation">
-        <p className="nav-heading">Workspace</p>
-        <a className="sidebar-link active" href="#overview" onClick={() => setSidebarOpen(false)}><Icon name="home" />Overview</a>
-        <a className="sidebar-link" href="#agents" onClick={() => setSidebarOpen(false)}><Icon name="agents" />Agents<span className="nav-count">{agents.length}</span></a>
-        <a className="sidebar-link" href="#signals" onClick={() => setSidebarOpen(false)}><Icon name="send" />Signals<span className="nav-count">{signals.length}</span></a>
-        <a className="sidebar-link" href="#activity" onClick={() => setSidebarOpen(false)}><Icon name="activity" />Activity</a>
-        <p className="nav-heading separate">Resources</p>
-        <a className="sidebar-link" href="/docs"><Icon name="docs" />API docs<Icon name="arrow" size={14} /></a>
-        <a className="sidebar-link" href="https://github.com" target="_blank" rel="noreferrer"><Icon name="terminal" />Developer guide<Icon name="arrow" size={14} /></a>
-      </nav>
-      <div className="sidebar-footer"><div className="connection"><StatusBadge tone={systemReady ? "success" : "danger"}>{systemReady ? "API connected" : "API offline"}</StatusBadge><span>{lastChecked ? `Checked ${lastChecked.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Checking..."}</span></div><div className="profile"><span className="profile-avatar">AS</span><span><strong>Developer</strong><small>Local account</small></span><span className="more">•••</span></div></div>
-    </aside>
-    {sidebarOpen && <button className="sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
+  function openSignal(signal) {
+    setSelectedSignal(signal);
+  }
 
-    <div className="main-shell">
-      <header className="topbar"><button className="mobile-menu icon-button" onClick={() => setSidebarOpen(true)} aria-label="Open menu"><Icon name="menu" /></button><div className="breadcrumbs"><span>Workspace</span><Icon name="arrow" size={13} /><strong>Overview</strong></div><div className="topbar-tools"><div className={`health-pill ${health.status}`}><span className="health-pulse" />{health.status === "ok" ? "All systems operational" : health.status === "degraded" ? "Database offline" : health.status === "offline" ? "API offline" : "Checking systems"}</div><button className="icon-button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}><Icon name={theme === "dark" ? "sun" : "moon"} /></button><button className="secondary-button refresh" onClick={checkHealth} disabled={checking}><Icon name="refresh" />Refresh</button></div></header>
+  function activateSignal(event, signal) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openSignal(signal);
+    }
+  }
 
-      <main className="content" id="overview">
-        <section className="page-header"><div><p className="section-kicker">Workspace overview</p><h1>Overview</h1><p className="page-description">Monitor your agent network and see how business signals move through the system.</p></div><button ref={registerTrigger} className="primary-button" onClick={() => openModal("register")}><Icon name="plus" />Register agent</button></section>
-        {healthError && <div className="alert danger" role="alert"><span><strong>Service unavailable.</strong> {healthError}</span><button onClick={checkHealth}>Try again</button></div>}
+  return (
+    <div className="app-shell">
+      <a className="skip-link" href="#overview">
+        Skip to content
+      </a>
 
-        <section className="kpi-grid" aria-label="System status">
-          <article className="kpi-card"><div className="kpi-top"><span>API gateway</span><StatusBadge tone={systemReady ? "success" : "danger"}>{systemReady ? "Online" : "Offline"}</StatusBadge></div><strong>{systemReady ? "Operational" : "Unavailable"}</strong><small>FastAPI service</small></article>
-          <article className="kpi-card"><div className="kpi-top"><span>Database</span><StatusBadge tone={databaseReady ? "success" : "warning"}>{databaseReady ? "Online" : "Offline"}</StatusBadge></div><strong>{databaseReady ? "Connected" : "Needs attention"}</strong><small>PostgreSQL + pgvector</small></article>
-          <article className="kpi-card"><div className="kpi-top"><span>Signals published</span><span className="kpi-trend">24h</span></div><strong>—</strong><small>Connect a data endpoint to track totals</small></article>
-          <article className="kpi-card"><div className="kpi-top"><span>Agents registered</span><span className="kpi-trend">Total</span></div><strong>{agents.length}</strong><small>Demo data until the read API is ready</small></article>
-        </section>
+      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+        <div className="sidebar-brand">
+          <BrandMark />
+          <span className="brand-copy">
+            <strong>AgentMesh</strong>
+            <small>Asama.ai</small>
+          </span>
+          <button
+            className="sidebar-close icon-button"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close navigation"
+          >
+            <Icon name="close" />
+          </button>
+        </div>
 
-        <section className="main-grid">
-          <article className="card table-card" id="signals"><div className="card-header"><div><h2>Recent signals</h2><p>Business opportunities moving through the network.</p></div><a className="text-button" href="#activity">View activity <Icon name="arrow" size={14} /></a></div><div className="table-scroll"><table><thead><tr><th>Time</th><th>Publisher</th><th>Signal</th><th>Matched</th><th>Status</th><th>Actions</th></tr></thead><tbody>{signals.map((signal) => <tr key={signal.id} onClick={() => setSelectedSignal(signal)} tabIndex="0" onKeyDown={(event) => event.key === "Enter" && setSelectedSignal(signal)}><td className="muted-cell">{signal.time}</td><td><strong>{signal.publisher}</strong></td><td className="signal-cell">{signal.content}</td><td>{signal.matched ? `${signal.matched} agents` : "None"}</td><td><StatusBadge tone={signal.delivery === "Delivered" ? "success" : "info"}>{signal.delivery}</StatusBadge></td><td><button className="action-button dangerous" onClick={(event) => { event.stopPropagation(); deleteSignal(signal.id); }}><Icon name="x" /> Delete</button></td></tr>)}</tbody></table></div></article>
-          <aside className="card actions-card"><div className="card-header"><div><h2>Quick actions</h2><p>Common tasks for your workspace.</p></div></div><div className="action-list"><button className="action-item" onClick={() => openModal("register")}><span className="action-icon blue"><Icon name="agents" /></span><span><strong>Register an agent</strong><small>Create credentials for a business participant.</small></span><Icon name="arrow" size={15} /></button><button className="action-item" onClick={() => openModal("publish")}><span className="action-icon green"><Icon name="send" /></span><span><strong>Publish a signal</strong><small>Send an opportunity into the matching pipeline.</small></span><Icon name="arrow" size={15} /></button><a className="action-item" href="/docs"><span className="action-icon gray"><Icon name="docs" /></span><span><strong>Open API docs</strong><small>Explore endpoints in Swagger UI.</small></span><Icon name="arrow" size={15} /></a></div></aside>
-        </section>
+        <div className="workspace">
+          <Monogram name="Asama workspace" size="sm" />
+          <span className="workspace-copy">
+            <strong>Asama workspace</strong>
+            <small>Local environment</small>
+          </span>
+          <span className="workspace-tag">Local</span>
+        </div>
 
-        <section className="card table-card" id="agents"><div className="card-header"><div><h2>Agents</h2><p>Connected participants in this workspace.</p></div><label className="search-field"><Icon name="search" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search agents" aria-label="Search agents" /></label></div><div className="table-scroll"><table><thead><tr><th>Company</th><th>Webhook host</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody>{filteredAgents.map((item) => <tr key={item.id}><td><strong>{item.company}</strong></td><td className="mono-cell">{item.host}</td><td><StatusBadge tone={item.status === "Active" ? "success" : "warning"}>{item.status}</StatusBadge></td><td className="muted-cell">{item.created}</td><td><button className="action-button dangerous" onClick={(event) => { event.stopPropagation(); deleteAgent(item.id); }}><Icon name="x" /> Delete</button></td></tr>)}</tbody></table>{!filteredAgents.length && <div className="empty-state"><Icon name="search" size={22} /><strong>No agents found</strong><span>Try a different company name.</span></div>}</div></section>
+        <nav className="sidebar-nav" aria-label="Main navigation">
+          <p className="nav-heading">Workspace</p>
+          <a className="sidebar-link active" href="#overview" aria-current="page" onClick={() => setSidebarOpen(false)}>
+            <Icon name="overview" />
+            Overview
+          </a>
+          <a className="sidebar-link" href="#agents" onClick={() => setSidebarOpen(false)}>
+            <Icon name="agents" />
+            Agents
+            <span className="nav-count">{agents.length}</span>
+          </a>
+          <a className="sidebar-link" href="#signals" onClick={() => setSidebarOpen(false)}>
+            <Icon name="signals" />
+            Signals
+            <span className="nav-count">{signals.length}</span>
+          </a>
+          <a className="sidebar-link" href="#routing" onClick={() => setSidebarOpen(false)}>
+            <Icon name="activity" />
+            Routing
+            <span className="nav-count">{routing.length}</span>
+          </a>
 
-        <section className="card table-card" id="activity"><div className="card-header"><div><h2>Routing activity</h2><p>How signals are being matched and delivered.</p></div><span className="table-caption">Demo data</span></div><div className="table-scroll"><table><thead><tr><th>Post</th><th>Target agent</th><th>Vector distance</th><th>Relevance score</th><th>Delivered</th><th>Actions</th></tr></thead><tbody>{routing.map((item, index) => <tr key={`${item.post}-${item.target}-${index}`}><td className="mono-cell">{item.post}...</td><td><strong>{item.target}</strong></td><td className="mono-cell">{item.distance}</td><td className="mono-cell">{item.score}</td><td><StatusBadge tone="success">{item.delivered}</StatusBadge></td><td><button className="action-button dangerous" onClick={(event) => { event.stopPropagation(); deleteRouting(index); }}><Icon name="x" /> Delete</button></td></tr>)}</tbody></table></div></section>
-        <p className="data-note"><Icon name="docs" size={14} /> Tables currently show demo data. Add read endpoints to connect live totals and activity.</p>
-      </main>
-      <footer><span>AgentMesh / Asama.ai</span><span>Local development dashboard <i>•</i> v0.1.0</span></footer>
+          <p className="nav-heading separated">Resources</p>
+          <a className="sidebar-link" href="/docs">
+            <Icon name="docs" />
+            API reference
+          </a>
+          <a className="sidebar-link" href="/openapi.json">
+            <Icon name="code" />
+            OpenAPI schema
+          </a>
+          <a className="sidebar-link" href="/health">
+            <Icon name="activity" />
+            Health probe
+          </a>
+        </nav>
+
+        <div className="sidebar-footer">
+          <div className="status-card">
+            <div className="status-row">
+              <StatusBadge tone={systemReady ? "success" : "danger"}>
+                {systemReady ? "API connected" : "API offline"}
+              </StatusBadge>
+              <span className="status-latency mono">{latency !== null ? `${latency} ms` : "—"}</span>
+            </div>
+            <span className="status-caption">
+              {lastChecked ? `Last checked ${formatTime(lastChecked)}` : "Checking the connection"}
+            </span>
+          </div>
+          <div className="profile">
+            <span className="profile-avatar" aria-hidden="true">
+              AS
+            </span>
+            <span className="profile-copy">
+              <strong>Developer</strong>
+              <small>Local account</small>
+            </span>
+          </div>
+        </div>
+      </aside>
+
+      {sidebarOpen && (
+        <button className="sidebar-overlay" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />
+      )}
+
+      <div className="main-shell">
+        <header className="topbar">
+          <div className="topbar-left">
+            <button className="mobile-menu icon-button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">
+              <Icon name="menu" />
+            </button>
+            <nav className="breadcrumb" aria-label="Breadcrumb">
+              <span>Asama workspace</span>
+              <span className="crumb-sep" aria-hidden="true">
+                /
+              </span>
+              <strong>Overview</strong>
+            </nav>
+          </div>
+          <div className="topbar-actions">
+            <span className={`health-pill ${healthTone}`} role="status" aria-label={healthLabel} title={healthLabel}>
+              <span className="health-dot" aria-hidden="true" />
+              <span className="health-label">{healthLabel}</span>
+            </span>
+            <button
+              className="icon-button"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+            >
+              <Icon name={theme === "dark" ? "sun" : "moon"} />
+            </button>
+            <button className="secondary-button refresh-button" onClick={checkHealth} disabled={checking} aria-label="Refresh system status">
+              <Icon name="refresh" className={checking ? "spinning" : ""} />
+              <span>Refresh</span>
+            </button>
+          </div>
+        </header>
+
+        <main className="content" id="overview">
+          <section className="page-header">
+            <div className="page-heading">
+              <h1>Network overview</h1>
+              <p>Signals, matches, and deliveries across your agent network.</p>
+            </div>
+            <div className="header-actions">
+              <button
+                ref={registerTrigger}
+                className="secondary-button"
+                onClick={() => openModal("register")}
+              >
+                <Icon name="plus" />
+                Register agent
+              </button>
+              <button className="primary-button" onClick={() => openModal("publish")}>
+                <Icon name="signals" />
+                Publish signal
+              </button>
+            </div>
+          </section>
+
+          {healthError && (
+            <div className="alert" role="alert">
+              <span>
+                <strong>Service unavailable.</strong> {healthError}
+              </span>
+              <button onClick={checkHealth}>Try again</button>
+            </div>
+          )}
+
+          <section className="metric-band" aria-label="Workspace metrics">
+            <article className="metric">
+              <div className="metric-top">
+                <span className="metric-label">Active agents</span>
+              </div>
+              <div className="metric-value">
+                {activeAgents}
+                <span className="metric-unit">of {agents.length}</span>
+              </div>
+              <p className="metric-foot">
+                {!agents.length
+                  ? "No agents registered yet"
+                  : pausedAgents
+                    ? `${pausedAgents} paused`
+                    : "All participants active"}
+              </p>
+            </article>
+
+            <article className="metric">
+              <div className="metric-top">
+                <span className="metric-label">Signals published</span>
+              </div>
+              <div className="metric-value">
+                {weekSignals}
+                <span className="metric-unit">this week</span>
+              </div>
+              <p className="metric-foot">{signals.length} saved in this browser</p>
+            </article>
+
+            <article className="metric">
+              <div className="metric-top">
+                <span className="metric-label">Delivery rate</span>
+              </div>
+              <div className="metric-value">
+                {routing.length ? deliveryRate : "—"}
+                {routing.length ? <span className="metric-unit">%</span> : null}
+              </div>
+              <p className="metric-foot">
+                {routing.length
+                  ? `${deliveredCount} of ${routing.length} routed decisions`
+                  : "No routing decisions yet"}
+              </p>
+            </article>
+
+            <article className="metric">
+              <div className="metric-top">
+                <span className="metric-label">Average relevance</span>
+              </div>
+              <div className="metric-value">
+                {routing.length ? averageRelevance.toFixed(2) : "—"}
+              </div>
+              <p className="metric-foot">Threshold 0.75</p>
+            </article>
+          </section>
+
+          <section className="overview-grid">
+            <article className="card chart-card">
+              <header className="card-head">
+                <div>
+                  <h2>Signal throughput</h2>
+                  <p>Signals published and matches delivered over the last seven days.</p>
+                </div>
+                <div className="legend" aria-hidden="true">
+                  <span>
+                    <i className="swatch signals" />
+                    Signals
+                  </span>
+                  <span>
+                    <i className="swatch matches" />
+                    Matches
+                  </span>
+                </div>
+              </header>
+              <ThroughputChart data={throughput} />
+              <footer className="chart-foot">
+                <span>
+                  {weekSignals ? `${weekSignals} ${weekSignals === 1 ? "signal" : "signals"}, ${weekMatches} ${weekMatches === 1 ? "match" : "matches"}` : "No signals in the last seven days"}
+                </span>
+                <span>
+                  {peakDay.signals
+                    ? `Peak on ${peakDay.label} ${peakDay.date}, ${peakDay.signals} ${peakDay.signals === 1 ? "signal" : "signals"}`
+                    : "Publish a signal to start the trend"}
+                </span>
+              </footer>
+            </article>
+
+            <article className="card pipeline-card">
+              <header className="card-head">
+                <div>
+                  <h2>Routing pipeline</h2>
+                  <p>The path from a published signal to a signed webhook.</p>
+                </div>
+              </header>
+              <ol className="pipeline">
+                {pipeline.map((stage, index) => (
+                  <li key={stage.label}>
+                    <span className="pipeline-marker" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <div className="pipeline-body">
+                      <div className="pipeline-row">
+                        <strong>{stage.label}</strong>
+                        <span className="pipeline-count">{stage.count}</span>
+                      </div>
+                      <div className="pipeline-row">
+                        <span className="pipeline-detail">{stage.detail}</span>
+                        <span className="pipeline-meta mono">{stage.meta}</span>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+              <footer className="pipeline-foot">
+                <Icon name="shield" size={14} />
+                Inactive and blocked agents are filtered before recall.
+              </footer>
+            </article>
+          </section>
+
+          <section className="split-grid">
+            <article className="card table-card" id="signals">
+              <header className="card-head">
+                <div>
+                  <h2>Recent signals</h2>
+                  <p>Needs and offers entering the network.</p>
+                </div>
+                <label className="search-field">
+                  <Icon name="search" size={14} />
+                  <input
+                    value={searchSignals}
+                    onChange={(event) => setSearchSignals(event.target.value)}
+                    placeholder="Search signals"
+                    aria-label="Search signals"
+                  />
+                </label>
+              </header>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Signal</th>
+                      <th scope="col">Publisher</th>
+                      <th scope="col" className="num">
+                        Matched
+                      </th>
+                      <th scope="col">Status</th>
+                      <th scope="col" className="hide-sm">
+                        Time
+                      </th>
+                      <th scope="col">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  {filteredSignals.length ? (
+                    <tbody>
+                      {filteredSignals.map((signal) => (
+                        <tr
+                          key={signal.id}
+                          className="clickable"
+                          tabIndex={0}
+                          onClick={() => openSignal(signal)}
+                          onKeyDown={(event) => activateSignal(event, signal)}
+                          aria-label={`Open signal from ${signal.publisher}`}
+                        >
+                          <td className="cell-signal">
+                            <span className="signal-content">{signal.content}</span>
+                            <span className="signal-id mono">#{signal.id.slice(0, 8)}</span>
+                          </td>
+                          <td>
+                            <div className="identity">
+                              <Monogram name={signal.publisher} size="sm" />
+                              <span>{signal.publisher}</span>
+                            </div>
+                          </td>
+                          <td className="num">{signal.matched}</td>
+                          <td>
+                            <StatusBadge tone={deliveryTone(signal.delivery)}>{signal.delivery}</StatusBadge>
+                          </td>
+                          <td className="muted-cell hide-sm mono">{signal.time}</td>
+                          <td className="cell-actions">
+                            <button
+                              type="button"
+                              className="row-action"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setDeletingSignal(signal.id);
+                              }}
+                              aria-label={`Delete signal from ${signal.publisher}`}
+                            >
+                              <Icon name="trash" size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  ) : (
+                    <tbody>
+                      <tr>
+                        <td colSpan={6}>
+                          <div className="empty-state">
+                            <Icon name="search" size={20} />
+                            <strong>{searchSignals ? "No matching signals" : "No signals yet"}</strong>
+                            <span>
+                              {searchSignals
+                                ? "Try a publisher name, a post ID, or clear the search."
+                                : "Publish a signal and it will appear here as it is routed."}
+                            </span>
+                            {searchSignals ? (
+                              <button className="text-button" onClick={() => setSearchSignals("")}>
+                                Clear search
+                              </button>
+                            ) : (
+                              <button className="text-button" onClick={() => openModal("publish")}>
+                                Publish a signal
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  )}
+                </table>
+              </div>
+            </article>
+
+            <aside className="card actions-card" aria-labelledby="quick-actions-title">
+              <header className="card-head">
+                <div>
+                  <h2 id="quick-actions-title">Quick actions</h2>
+                  <p>Keep the network moving.</p>
+                </div>
+              </header>
+              <div className="action-list">
+                <button type="button" className="action-item" onClick={() => openModal("publish")}>
+                  <span className="action-icon">
+                    <Icon name="signals" />
+                  </span>
+                  <span className="action-copy">
+                    <strong>Publish a signal</strong>
+                    <small>Send a need into the routing pipeline.</small>
+                  </span>
+                  <Icon name="chevronRight" size={15} className="action-chevron" />
+                </button>
+                <button type="button" className="action-item" onClick={() => openModal("register")}>
+                  <span className="action-icon">
+                    <Icon name="agents" />
+                  </span>
+                  <span className="action-copy">
+                    <strong>Register an agent</strong>
+                    <small>Issue credentials for a business participant.</small>
+                  </span>
+                  <Icon name="chevronRight" size={15} className="action-chevron" />
+                </button>
+                <a className="action-item" href="/docs">
+                  <span className="action-icon">
+                    <Icon name="docs" />
+                  </span>
+                  <span className="action-copy">
+                    <strong>Read the API reference</strong>
+                    <small>Endpoints, payloads, and webhook signatures.</small>
+                  </span>
+                  <Icon name="chevronRight" size={15} className="action-chevron" />
+                </a>
+              </div>
+              <div className="key-status">
+                <span className={`key-icon ${apiKey ? "ready" : ""}`}>
+                  <Icon name="key" size={15} />
+                </span>
+                <span className="key-copy">
+                  <strong>{apiKey ? "API key stored" : "No API key yet"}</strong>
+                  <small>
+                    {apiKey
+                      ? "This browser can publish signals."
+                      : "Register an agent to publish signals."}
+                  </small>
+                </span>
+              </div>
+            </aside>
+          </section>
+
+          <section className="card table-card" id="routing">
+            <header className="card-head routing-head">
+              <div>
+                <h2>Routing decisions</h2>
+                <p>Candidate scores and delivery outcomes from recent signals.</p>
+              </div>
+              <div className="segmented" role="group" aria-label="Filter routing decisions">
+                {routingFilters.map((filter) => {
+                  const count =
+                    filter.id === "all"
+                      ? routing.length
+                      : filter.id === "delivered"
+                        ? deliveredCount
+                        : routing.length - deliveredCount;
+                  return (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      className={routingFilter === filter.id ? "active" : ""}
+                      aria-pressed={routingFilter === filter.id}
+                      onClick={() => setRoutingFilter(filter.id)}
+                    >
+                      {filter.label}
+                      <span>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </header>
+            <div className="table-scroll">
+              <table className="routing-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Target agent</th>
+                    <th scope="col">Signal</th>
+                    <th scope="col">Distance</th>
+                    <th scope="col">Relevance</th>
+                    <th scope="col">Delivery</th>
+                    <th scope="col">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                {filteredRouting.length ? (
+                  <tbody>
+                    {filteredRouting.map((item) => (
+                      <tr key={item.id}>
+                        <td>
+                          <div className="identity">
+                            <Monogram name={item.target} size="sm" />
+                            <span>{item.target}</span>
+                          </div>
+                        </td>
+                        <td className="mono muted-cell">#{item.post}</td>
+                        <td className="mono muted-cell">{item.distance.toFixed(2)}</td>
+                        <td>
+                          <ScoreMeter score={item.score} />
+                        </td>
+                        <td>
+                          <StatusBadge tone={item.delivered ? "success" : "neutral"}>
+                            {item.delivered ? "Delivered" : "Below threshold"}
+                          </StatusBadge>
+                        </td>
+                        <td className="cell-actions">
+                          <button
+                            type="button"
+                            className="row-action"
+                            onClick={() => setDeletingRouting(item.id)}
+                            aria-label={`Remove routing decision for ${item.target}`}
+                          >
+                            <Icon name="trash" size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                ) : (
+                  <tbody>
+                    <tr>
+                      <td colSpan={6}>
+                        <div className="empty-state">
+                          <Icon name="activity" size={20} />
+                          <strong>No decisions in this view</strong>
+                          <span>Change the filter to see other routing outcomes.</span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                )}
+              </table>
+            </div>
+          </section>
+
+          <section className="card table-card" id="agents">
+            <header className="card-head">
+              <div>
+                <h2>Agents</h2>
+                <p>Business participants connected to this workspace.</p>
+              </div>
+              <label className="search-field">
+                <Icon name="search" size={14} />
+                <input
+                  value={searchAgents}
+                  onChange={(event) => setSearchAgents(event.target.value)}
+                  placeholder="Search agents"
+                  aria-label="Search agents"
+                />
+              </label>
+            </header>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Agent</th>
+                    <th scope="col">Webhook endpoint</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" className="hide-sm">
+                      Registered
+                    </th>
+                    <th scope="col">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                {filteredAgents.length ? (
+                  <tbody>
+                    {filteredAgents.map((item) => (
+                      <tr key={item.id}>
+                        <td>
+                          <div className="identity">
+                            <Monogram name={item.company} />
+                            <span className="identity-copy">
+                              <strong>{item.company}</strong>
+                              <small className="mono">#{item.id.slice(0, 8)}</small>
+                            </span>
+                          </div>
+                        </td>
+                        <td className="mono endpoint-cell" title={item.host}>
+                          {item.host}
+                        </td>
+                        <td>
+                          <StatusBadge tone={item.status === "Active" ? "success" : "warning"}>
+                            {item.status}
+                          </StatusBadge>
+                        </td>
+                        <td className="muted-cell hide-sm">{item.created}</td>
+                        <td className="cell-actions">
+                          <button
+                            type="button"
+                            className="row-action"
+                            onClick={() => setDeletingAgent(item.id)}
+                            aria-label={`Delete ${item.company}`}
+                          >
+                            <Icon name="trash" size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                ) : (
+                  <tbody>
+                    <tr>
+                      <td colSpan={5}>
+                        <div className="empty-state">
+                          <Icon name="agents" size={20} />
+                          <strong>{searchAgents ? "No matching agents" : "No agents yet"}</strong>
+                          <span>
+                            {searchAgents
+                              ? "Try another company name, or clear the search."
+                              : "Register an agent to connect a business participant."}
+                          </span>
+                          {searchAgents ? (
+                            <button className="text-button" onClick={() => setSearchAgents("")}>
+                              Clear search
+                            </button>
+                          ) : (
+                            <button className="text-button" onClick={() => openModal("register")}>
+                              Register an agent
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                )}
+              </table>
+            </div>
+          </section>
+
+          <p className="data-note">
+            <Icon name="info" size={14} />
+            <span>
+              Registration and publishing call the live API. This browser keeps its own copy of
+              agents, signals, and routing rows in local storage, because the API does not expose
+              read endpoints yet. The single example row can be deleted like any other. See the{" "}
+              <a href="/docs">API reference</a>.
+            </span>
+          </p>
+        </main>
+
+        <footer className="page-footer">
+          <span>AgentMesh, Asama.ai</span>
+          <span>Local workspace</span>
+          <span>v0.1.0</span>
+        </footer>
+      </div>
+
+      {activeModal === "register" && (
+        <Modal
+          title="Register an agent"
+          description="Create credentials for a business participant."
+          onClose={closeModal}
+          wide={!credentials}
+        >
+          <form onSubmit={registerAgent} className="modal-form">
+            {credentials ? (
+              <>
+                <div className="credential-warning">
+                  <strong>Store these credentials now.</strong>
+                  <span>The API key and webhook secret will not be shown again.</span>
+                </div>
+                <CredentialRow
+                  label="Agent ID"
+                  value={credentials.agent_id}
+                  copied={copied}
+                  onCopy={copyValue}
+                />
+                <CredentialRow
+                  label="API key"
+                  value={credentials.api_key}
+                  copied={copied}
+                  onCopy={copyValue}
+                  mono
+                />
+                <CredentialRow
+                  label="Webhook secret"
+                  value={credentials.webhook_secret}
+                  copied={copied}
+                  onCopy={copyValue}
+                  mono
+                />
+                <div className="modal-actions">
+                  <button type="button" className="primary-button" onClick={closeModal}>
+                    Done
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label>
+                  Company name
+                  <input name="company_name" required minLength="2" placeholder="PhonePe" autoFocus />
+                </label>
+                <label>
+                  Webhook URL
+                  <input
+                    name="webhook_url"
+                    required
+                    type="url"
+                    placeholder="https://example.com/webhook"
+                  />
+                  <span className="field-hint">Signed deliveries are sent to this endpoint.</span>
+                </label>
+                <label>
+                  Interest manifesto
+                  <textarea
+                    name="interest_manifesto"
+                    required
+                    minLength="20"
+                    maxLength="2000"
+                    placeholder="Looking for payment and lending partnerships in India."
+                  />
+                  <span className="field-hint">
+                    Describe what this agent is looking for. Minimum 20 characters.
+                  </span>
+                </label>
+                {registerError && <p className="form-error">{registerError}</p>}
+                <div className="modal-actions">
+                  <button type="button" className="secondary-button" onClick={closeModal}>
+                    Cancel
+                  </button>
+                  <button className="primary-button" disabled={registering || !databaseReady}>
+                    {registering
+                      ? "Registering..."
+                      : databaseReady
+                        ? "Register agent"
+                        : "Connect database first"}
+                  </button>
+                </div>
+              </>
+            )}
+          </form>
+        </Modal>
+      )}
+
+      {activeModal === "publish" && (
+        <Modal
+          title="Publish a signal"
+          description="Describe an opportunity or need for the network."
+          onClose={closeModal}
+        >
+          <form onSubmit={publishPost} className="modal-form">
+            <label>
+              API key
+              <div className="password-field">
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(event) => updateApiKey(event.target.value)}
+                  required
+                  placeholder="asama_..."
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="reveal-button"
+                  onClick={() => setShowApiKey((value) => !value)}
+                  aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                >
+                  <Icon name={showApiKey ? "eyeOff" : "eye"} size={15} />
+                </button>
+              </div>
+            </label>
+            <label>
+              Signal content
+              <textarea
+                value={postContent}
+                onChange={(event) => setPostContent(event.target.value)}
+                required
+                minLength="10"
+                maxLength="2000"
+                placeholder="We are launching a merchant lending product for small businesses."
+              />
+              <span className="character-count">{postContent.length} / 2000</span>
+            </label>
+            {postError && <p className="form-error">{postError}</p>}
+            <div className="modal-actions">
+              <button type="button" className="secondary-button" onClick={closeModal}>
+                Cancel
+              </button>
+              <button
+                className="primary-button"
+                disabled={publishing || !apiKey.trim() || !databaseReady}
+              >
+                {publishing
+                  ? "Queuing..."
+                  : databaseReady
+                    ? "Publish signal"
+                    : "Connect database first"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {selectedSignal && (
+        <Modal
+          title="Signal details"
+          description={`Published by ${selectedSignal.publisher} at ${selectedSignal.time}.`}
+          onClose={() => setSelectedSignal(null)}
+        >
+          <div className="signal-detail">
+            <span className="detail-label">Content</span>
+            <p className="signal-quote">{selectedSignal.content}</p>
+            <div className="detail-grid">
+              <div>
+                <span>Matched agents</span>
+                <strong>{selectedSignal.matched}</strong>
+              </div>
+              <div>
+                <span>Delivery</span>
+                <StatusBadge tone={deliveryTone(selectedSignal.delivery)}>
+                  {selectedSignal.delivery}
+                </StatusBadge>
+              </div>
+            </div>
+            <div className="detail-id">
+              <span>Post ID</span>
+              <code>{selectedSignal.id}</code>
+              <button
+                type="button"
+                className="copy-button"
+                onClick={() => copyValue("signal-id", selectedSignal.id)}
+              >
+                <Icon name="copy" size={13} />
+                {copied === "signal-id" ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="danger-button"
+                onClick={() => {
+                  setDeletingSignal(selectedSignal.id);
+                  setSelectedSignal(null);
+                }}
+              >
+                Delete signal
+              </button>
+              <button type="button" className="secondary-button" onClick={() => setSelectedSignal(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {deletingAgent && (
+        <ConfirmModal
+          title="Delete agent"
+          description="Remove this participant from the workspace?"
+          onConfirm={() => confirmDeleteAgent(deletingAgent)}
+          onCancel={() => setDeletingAgent(null)}
+          confirmLabel="Delete agent"
+        />
+      )}
+
+      {deletingSignal && (
+        <ConfirmModal
+          title="Delete signal"
+          description="Remove this signal and its routing history?"
+          onConfirm={() => confirmDeleteSignal(deletingSignal)}
+          onCancel={() => setDeletingSignal(null)}
+          confirmLabel="Delete signal"
+        />
+      )}
+
+      {deletingRouting && (
+        <ConfirmModal
+          title="Delete routing decision"
+          description="Remove this entry from the activity log?"
+          onConfirm={() => confirmDeleteRouting(deletingRouting)}
+          onCancel={() => setDeletingRouting(null)}
+          confirmLabel="Delete decision"
+        />
+      )}
+
+      {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
     </div>
-
-    {activeModal === "register" && <Modal title="Register an agent" description="Create credentials for a business participant." onClose={closeModal} wide={!credentials}><form onSubmit={registerAgent} className="modal-form">{credentials ? <><div className="credential-warning"><strong>Store these credentials now.</strong><span>The API key and webhook secret will not be shown again after you close this window.</span></div><CredentialRow label="Agent ID" value={credentials.agent_id} copied={copied} onCopy={copyValue} /><CredentialRow label="API key" value={credentials.api_key} copied={copied} onCopy={copyValue} mono /><CredentialRow label="Webhook secret" value={credentials.webhook_secret} copied={copied} onCopy={copyValue} mono /><div className="modal-actions"><button type="button" className="primary-button" onClick={closeModal}>Done</button></div></> : <><label>Company name<input name="company_name" required minLength="2" placeholder="PhonePe" /></label><label>Webhook URL<input name="webhook_url" required type="url" placeholder="https://example.com/webhook" /></label><label>Interest description<textarea name="interest_manifesto" required minLength="20" maxLength="2000" placeholder="Looking for payment and lending partnerships in India." /><span className="field-hint">Describe what this agent is looking for. Minimum 20 characters.</span></label>{registerError && <p className="form-error">{registerError}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Cancel</button><button className="primary-button" disabled={registering || !databaseReady}>{registering ? "Registering..." : databaseReady ? "Register agent" : "Connect database first"}</button></div></>}</form></Modal>}
-    {activeModal === "publish" && <Modal title="Publish a signal" description="Describe an opportunity or need for the network." onClose={closeModal}><form onSubmit={publishPost} className="modal-form"><label>API key<div className="password-field"><input type="password" value={apiKey} onChange={(event) => updateApiKey(event.target.value)} required placeholder="asama_..." /></div></label><label>Signal content<textarea value={postContent} onChange={(event) => setPostContent(event.target.value)} required minLength="10" maxLength="2000" placeholder="We are launching a merchant lending product for small businesses." /><span className="character-count">{postContent.length} / 2000</span></label>{postError && <p className="form-error">{postError}</p>}<div className="modal-actions"><button type="button" className="secondary-button" onClick={closeModal}>Cancel</button><button className="primary-button" disabled={publishing || !apiKey || !databaseReady}>{publishing ? "Queuing..." : databaseReady ? "Publish signal" : "Connect database first"}<Icon name="send" size={15} /></button></div></form></Modal>}
-    {selectedSignal && <Modal title="Signal details" description={`Published by ${selectedSignal.publisher} at ${selectedSignal.time}.`} onClose={() => setSelectedSignal(null)}><div className="signal-detail"><div className="detail-label">Content</div><p>{selectedSignal.content}</p><div className="detail-grid"><div><span>Post ID</span><strong className="mono-cell">{selectedSignal.id}...</strong></div><div><span>Matched agents</span><strong>{selectedSignal.matched}</strong></div><div><span>Delivery</span><StatusBadge tone={selectedSignal.delivery === "Delivered" ? "success" : "info"}>{selectedSignal.delivery}</StatusBadge></div></div></div></Modal>}
-    {deletingAgent && <ConfirmModal title="Delete Agent" description="Are you sure you want to remove this agent from the workspace?" onConfirm={() => confirmDeleteAgent(deletingAgent)} onCancel={() => setDeletingAgent(null)}><div>This will remove the agent from the agents list and any associated data. This action cannot be undone.</div></ConfirmModal>}
-    {deletingSignal && <ConfirmModal title="Delete Signal" description="Are you sure you want to remove this signal from the workspace?" onConfirm={() => confirmDeleteSignal(deletingSignal)} onCancel={() => setDeletingSignal(null)}><div>This will remove the signal from the signals list. This action cannot be undone.</div></ConfirmModal>}
-    {deletingRouting !== null && <ConfirmModal title="Delete Activity" description="Are you sure you want to remove this routing entry?" onConfirm={() => confirmDeleteRouting(deletingRouting)} onCancel={() => setDeletingRouting(null)}><div>This will remove the routing entry from the activity log.</div></ConfirmModal>}
-    {toast && <div className={`toast ${toast.tone}`} role="status"><span className="toast-icon"><Icon name="check" size={15} /></span><span><strong>{toast.title}</strong><small>{toast.message}</small></span><button className="toast-close" onClick={() => setToast(null)} aria-label="Dismiss notification"><Icon name="close" size={14} /></button></div>}
-  </div>;
+  );
 }
 
 function CredentialRow({ label, value, copied, onCopy, mono = false }) {
-  return <div className="credential-row"><span>{label}</span><div className={mono ? "credential-value mono-cell" : "credential-value"}>{value}</div><button className="copy-button" onClick={() => onCopy(label, value)}><Icon name="copy" size={14} />{copied === label ? "Copied" : "Copy"}</button></div>;
+  return (
+    <div className="credential-row">
+      <span>{label}</span>
+      <div className={`credential-value ${mono ? "mono" : ""}`}>{value}</div>
+      <button type="button" className="copy-button" onClick={() => onCopy(label, value)}>
+        <Icon name="copy" size={13} />
+        {copied === label ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
 }
 
 createRoot(document.getElementById("root")).render(<App />);

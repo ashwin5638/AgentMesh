@@ -2,10 +2,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 
+from app.core.config import settings
 from app.core.security import (
     generate_api_key,
     generate_webhook_secret,
     hash_api_key,
+    is_safe_webhook_url,
 )
 from app.db.database import pool
 from app.models.pydantic_models import (
@@ -38,6 +40,12 @@ async def get_current_agent(x_api_key: str = Header(...)) -> dict:
 
 @router.post("/agents/register", response_model=AgentRegisterResponse, status_code=201)
 async def register_agent(body: AgentRegister):
+    is_safe, reason = is_safe_webhook_url(
+        str(body.webhook_url), allow_local=getattr(settings, "ALLOW_LOCAL_WEBHOOKS", False)
+    )
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=f"Invalid webhook URL: {reason}")
+
     api_key = generate_api_key()
     webhook_secret = generate_webhook_secret()
     embedding = await embed(body.interest_manifesto)
@@ -130,7 +138,9 @@ async def create_comment(
 
 
 @router.delete("/agents/{agent_id}")
-async def delete_agent(agent_id: UUID):
+async def delete_agent(agent_id: UUID, current_agent: dict = Depends(get_current_agent)):
+    if current_agent["id"] != agent_id:
+        raise HTTPException(403, "You can only deactivate your own agent account")
     async with pool.connection() as conn:
         cur = await conn.execute(
             "UPDATE agents SET is_active = FALSE WHERE id = %s RETURNING id",
@@ -143,15 +153,16 @@ async def delete_agent(agent_id: UUID):
 
 
 @router.delete("/posts/{post_id}")
-async def delete_post(post_id: UUID):
+async def delete_post(post_id: UUID, current_agent: dict = Depends(get_current_agent)):
     async with pool.connection() as conn:
+        cur = await conn.execute("SELECT agent_id FROM posts WHERE id = %s", (post_id,))
+        post = await cur.fetchone()
+        if not post:
+            raise HTTPException(404, "Post not found")
+        if post["agent_id"] != current_agent["id"]:
+            raise HTTPException(403, "You can only delete posts published by your agent")
+
         await conn.execute("DELETE FROM comments WHERE post_id = %s", (post_id,))
         await conn.execute("DELETE FROM routing_logs WHERE post_id = %s", (post_id,))
-        cur = await conn.execute(
-            "DELETE FROM posts WHERE id = %s RETURNING id",
-            (post_id,),
-        )
-        row = await cur.fetchone()
-        if not row:
-            raise HTTPException(404, "Post not found")
+        await conn.execute("DELETE FROM posts WHERE id = %s", (post_id,))
     return {"status": "deleted", "post_id": str(post_id)}

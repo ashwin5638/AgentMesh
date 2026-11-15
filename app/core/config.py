@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     VECTOR_TOP_K: int = 50
     RELEVANCE_THRESHOLD: float = 0.75
     WEBHOOK_TIMEOUT: float = 10.0
+    ALLOW_LOCAL_WEBHOOKS: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -13,7 +13,7 @@ from tenacity import (
 )
 
 from app.core.config import settings
-from app.core.security import sign_payload
+from app.core.security import is_safe_webhook_url, sign_payload
 from app.db.database import pool
 
 log = logging.getLogger(__name__)
@@ -25,6 +25,13 @@ class RetryableDeliveryError(Exception):
 
 async def deliver(url: str, secret: str, payload: dict) -> bool:
     """Send one signed webhook. Retries on network errors and 5xx. Returns True on 2xx/3xx."""
+    is_safe, reason = is_safe_webhook_url(
+        url, allow_local=getattr(settings, "ALLOW_LOCAL_WEBHOOKS", False)
+    )
+    if not is_safe:
+        log.warning("Blocked unsafe webhook delivery to %s: %s", url, reason)
+        return False
+
     body = json.dumps(payload, default=str).encode()
     timestamp = str(int(time.time()))
     headers = {
