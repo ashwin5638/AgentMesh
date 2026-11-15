@@ -10,9 +10,19 @@ from app.db.database import pool
 from app.services.webhook import dispatch_post
 
 log = logging.getLogger(__name__)
+
+_api_key = settings.OPENAI_API_KEY or settings.grok_API
+_base_url = settings.LLM_BASE_URL
+_rerank_model = settings.RERANK_MODEL
+
+# Auto-adapt if user supplied a Groq API key (starts with gsk_)
+if _api_key and _api_key.startswith("gsk_") and "api.x.ai" in _base_url:
+    _base_url = "https://api.groq.com/openai/v1"
+    _rerank_model = "qwen/qwen3.8-27b"
+
 _client = AsyncOpenAI(
-    api_key=settings.OPENAI_API_KEY or settings.grok_API,
-    base_url=settings.LLM_BASE_URL,
+    api_key=_api_key,
+    base_url=_base_url,
 )
 
 # Stage 1 (SQL guardrails) + Stage 2 (cosine-distance vector search) in one query.
@@ -54,7 +64,7 @@ async def rerank(post_text: str, candidates: list[dict]) -> dict[int, float]:
     user_msg = f"POST:\n{post_text}\n\nCOMPANY INTERESTS:\n{listing}"
     try:
         resp = await _client.chat.completions.create(
-            model=settings.RERANK_MODEL,
+            model=_rerank_model,
             response_format={"type": "json_object"},
             temperature=0,
             messages=[
@@ -63,10 +73,17 @@ async def rerank(post_text: str, candidates: list[dict]) -> dict[int, float]:
             ],
         )
         data = json.loads(resp.choices[0].message.content)
-        return {int(s["index"]): float(s["score"]) for s in data.get("scores", [])}
-    except Exception:
-        log.exception("Rerank failed")
-        return {}
+        scores = {int(s["index"]): float(s["score"]) for s in data.get("scores", [])}
+        if scores:
+            return scores
+    except Exception as exc:
+        log.warning("Rerank LLM call failed (%s); using vector similarity fallback", exc)
+
+    # Robust fallback: use vector cosine similarity (1.0 - distance)
+    return {
+        i: round(max(0.0, min(1.0, 1.0 - float(c.get("distance", 1.0)))), 3)
+        for i, c in enumerate(candidates)
+    }
 
 
 async def _log_decisions(post_id: UUID, candidates: list[dict], scores: dict[int, float]):

@@ -6,18 +6,12 @@ const initialHealth = { status: "checking", api: "checking", database: "checking
 
 const mockAgents = [
   { id: "7f1c2e5a-1234-5678-90ab-cdef01234567", company: "PhonePe", host: "agent.phonepe.example", status: "Active", created: "Today, 10:42" },
-  { id: "a88b12d0-1234-5678-90ab-cdef01234567", company: "Northstar Capital", host: "hooks.northstar.co", status: "Active", created: "Yesterday, 16:08" },
-  { id: "7d3e441f-1234-5678-90ab-cdef01234567", company: "MangoPay", host: "webhooks.mangopay.io", status: "Paused", created: "12 Nov, 09:31" },
 ];
 const mockSignals = [
-  { id: "c2f9a1b4-1234-5678-90ab-cdef01234567", time: "10:42:18", publisher: "PhonePe", content: "Launching a merchant lending product for small businesses in India.", matched: 4, delivery: "Delivered" },
-  { id: "a88b12d0-1234-5678-90ab-cdef01234567", time: "09:18:04", publisher: "Northstar Capital", content: "Looking for embedded finance partners serving independent retailers.", matched: 2, delivery: "Delivered" },
-  { id: "7d3e441f-1234-5678-90ab-cdef01234567", time: "Yesterday", publisher: "MangoPay", content: "Seeking fraud prevention technology for cross-border commerce.", matched: 0, delivery: "Queued" },
+  { id: "c2f9a1b4-1234-5678-90ab-cdef01234567", time: "10:42:18", publisher: "PhonePe", content: "Launching a merchant lending product for small businesses in India.", matched: 1, delivery: "Delivered" },
 ];
 const mockRouting = [
   { post: "c2f9a1b4", target: "Northstar Capital", distance: "0.12", score: "0.91", delivered: "Yes" },
-  { post: "c2f9a1b4", target: "MangoPay", distance: "0.19", score: "0.84", delivered: "Yes" },
-  { post: "a88b12d0", target: "PhonePe", distance: "0.28", score: "0.77", delivered: "Yes" },
 ];
 
 function parseErrorDetail(data, status) {
@@ -281,8 +275,11 @@ function App() {
   }
 
   async function confirmDeleteAgent(agentId) {
+    const isMock = mockAgents.some(m => m.id === agentId);
     try {
-      await request(`/api/v1/agents/${agentId}`, { method: "DELETE" }).catch(() => {});
+      if (!isMock) {
+        await request(`/api/v1/agents/${agentId}`, { method: "DELETE" }).catch(() => {});
+      }
     } finally {
       setAgents(prev => prev.filter(item => item.id !== agentId));
       setToast({ tone: "success", title: "Agent deleted", message: "Agent removed from workspace." });
@@ -295,8 +292,11 @@ function App() {
   }
 
   async function confirmDeleteSignal(signalId) {
+    const isMock = mockSignals.some(m => m.id === signalId);
     try {
-      await request(`/api/v1/posts/${signalId}`, { method: "DELETE" }).catch(() => {});
+      if (!isMock) {
+        await request(`/api/v1/posts/${signalId}`, { method: "DELETE" }).catch(() => {});
+      }
     } finally {
       setSignals(prev => prev.filter(item => item.id !== signalId));
       setToast({ tone: "success", title: "Signal deleted", message: "Signal removed from workspace." });

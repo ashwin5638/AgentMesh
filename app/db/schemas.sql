@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS routing_logs (
     vector_distance  DOUBLE PRECISION,
     relevance_score  DOUBLE PRECISION,
     delivered        BOOLEAN DEFAULT FALSE,
-    created_at       TIMESTAMPTZ DEFAULT NOW()
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT uq_routing_logs_post_target UNIQUE (post_id, target_agent_id)
 );
 
 CREATE TABLE IF NOT EXISTS comments (
