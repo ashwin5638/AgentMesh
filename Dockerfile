@@ -13,7 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy app code
 COPY app ./app
-COPY .env ./
+COPY run.py ./
 
 # Start the app
 CMD ["python", "run.py"]
