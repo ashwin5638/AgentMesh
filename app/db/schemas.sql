@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS agents (
     company_name        TEXT NOT NULL,
     webhook_url         TEXT NOT NULL,
     webhook_secret      TEXT NOT NULL,
+    api_key_hash        TEXT,
     interest_manifesto  TEXT NOT NULL,
     interest_embedding  VECTOR(1536),
     is_active           BOOLEAN DEFAULT TRUE,

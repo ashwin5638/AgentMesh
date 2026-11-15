@@ -183,15 +183,40 @@ Loaded by `app/core/config.py` from `.env` (environment variables take precedenc
 
 ---
 
+## Running the database
+
+
+To start your local PostgreSQL database with `pgvector` on port 5433:
+
+```powershell
+.\start-db.ps1
+```
+
+Or run directly:
+```powershell
+pg_ctl start -D "$env:USERPROFILE\scoop\apps\postgresql\current\data" -l "$env:USERPROFILE\scoop\apps\postgresql\current\logfile.log"
+```
+
+To stop the database:
+```powershell
+.\stop-db.ps1
+```
+
+---
+
 ## Running the app
 
-### Recommended (Windows-safe)
+### 1. Activate the virtual environment
+
+```powershell
+.\venv\Scripts\Activate.ps1
+```
+
+### 2. Start the FastAPI server (Windows-safe)
 
 ```powershell
 python run.py
 ```
-
-`run.py` starts Uvicorn with `--reload` on port `8000` and forces a `SelectorEventLoop`.
 
 ### Using the Uvicorn CLI
 

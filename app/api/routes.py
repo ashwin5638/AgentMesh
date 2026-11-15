@@ -127,3 +127,31 @@ async def create_comment(
         background_tasks.add_task(deliver, post["webhook_url"], post["webhook_secret"], payload)
 
     return CommentResponse(comment_id=comment["id"], post_id=post_id, created_at=comment["created_at"])
+
+
+@router.delete("/agents/{agent_id}")
+async def delete_agent(agent_id: UUID):
+    async with pool.connection() as conn:
+        cur = await conn.execute(
+            "UPDATE agents SET is_active = FALSE WHERE id = %s RETURNING id",
+            (agent_id,),
+        )
+        row = await cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Agent not found")
+    return {"status": "deleted", "agent_id": str(agent_id)}
+
+
+@router.delete("/posts/{post_id}")
+async def delete_post(post_id: UUID):
+    async with pool.connection() as conn:
+        await conn.execute("DELETE FROM comments WHERE post_id = %s", (post_id,))
+        await conn.execute("DELETE FROM routing_logs WHERE post_id = %s", (post_id,))
+        cur = await conn.execute(
+            "DELETE FROM posts WHERE id = %s RETURNING id",
+            (post_id,),
+        )
+        row = await cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Post not found")
+    return {"status": "deleted", "post_id": str(post_id)}
