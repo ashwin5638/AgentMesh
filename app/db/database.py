@@ -17,7 +17,7 @@ pool = AsyncConnectionPool(
     max_size=10,
     open=False,
     configure=_configure,
-    kwargs={"row_factory": dict_row, "prepare_threshold": None},
+    kwargs={"row_factory": dict_row, "prepare_threshold": None, "connect_timeout": 5},
 )
 
 
@@ -27,5 +27,7 @@ async def init_schema():
     import psycopg
 
     sql = (pathlib.Path(__file__).parent / "schemas.sql").read_text()
-    async with await psycopg.AsyncConnection.connect(settings.DATABASE_URL, autocommit=True) as conn:
+    async with await psycopg.AsyncConnection.connect(
+        settings.DATABASE_URL, autocommit=True, connect_timeout=5
+    ) as conn:
         await conn.execute(sql)

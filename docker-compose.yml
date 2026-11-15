@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:latest-postgres-16
+    container_name: agentmesh-postgres
+    environment:
+      - POSTGRES_DB=asama
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: agentmesh-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: agentmesh-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/asama
+      - REDIS_URL=redis://redis:6379/0
+      - grok_API=${grok_API}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY}
+      - LLM_BASE_URL=https://api.x.ai/v1
+      - EMBEDDING_BASE_URL=https://api.openai.com/v1
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    working_dir: /app
+
+volumes:
+  pgdata:

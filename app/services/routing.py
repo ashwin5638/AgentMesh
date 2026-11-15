@@ -10,7 +10,10 @@ from app.db.database import pool
 from app.services.webhook import dispatch_post
 
 log = logging.getLogger(__name__)
-_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+_client = AsyncOpenAI(
+    api_key=settings.OPENAI_API_KEY or settings.grok_API,
+    base_url=settings.LLM_BASE_URL,
+)
 
 # Stage 1 (SQL guardrails) + Stage 2 (cosine-distance vector search) in one query.
 CANDIDATE_SQL = """

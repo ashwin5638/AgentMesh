@@ -9,8 +9,8 @@ _client = AsyncOpenAI(
 
 
 embed_client = AsyncOpenAI(
-    api_key=settings.EMBEDDING_API_KEY,
-    base_url=settings.EMBEDDING_BASE_URL,   
+    api_key=settings.EMBEDDING_API_KEY or settings.grok_API,
+    base_url=settings.EMBEDDING_BASE_URL,
 )
 
 async def embed(text: str) -> list[float]:

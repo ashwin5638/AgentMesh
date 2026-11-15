@@ -2,10 +2,19 @@
 fastapi==0.162.7
 uvicorn==0.54.0
 pydantic==2.14.3
+pydantic-settings==2.16.3
 python-dotenv==1.2.4
+
+# Database
+psycopg[binary]==3.3.9
+psycopg-pool==3.3.3
+pgvector==0.5.1
 
 # HTTP client
 httpx==0.28.1
+
+# LLM / embeddings client
+openai==3.51.0
 
 # Background jobs / caching
 redis==8.1.0
